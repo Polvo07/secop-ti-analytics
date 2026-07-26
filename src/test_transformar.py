@@ -191,6 +191,32 @@ def main() -> int:
     ok(len(dimf) > 0 and dimf["fecha"].is_unique,
        "dim_fecha es continua y sin fechas repetidas", fallos)
 
+    print("\n== Prueba de carga por lotes ==")
+    # El archivo real tiene millones de filas: se verifica que leerlo por lotes
+    # produzca exactamente el mismo resultado que leerlo de una sola vez.
+    import config
+    from transformar import cargar_ti_por_lotes
+
+    grande = pd.concat([raw] * 30, ignore_index=True)
+    grande["id_contrato"] = grande["id_contrato"] + "-" + grande.index.astype(str)
+    ruta_tmp = config.DIR_RAW / "_prueba_lotes.csv"
+    grande.to_csv(ruta_tmp, index=False, encoding="utf-8")
+
+    try:
+        df_ti, total = cargar_ti_por_lotes(ruta_tmp, tam_lote=50)
+        ok(total == len(grande),
+           f"la lectura por lotes recorre todas las filas ({total:,})", fallos)
+        ok(len(df_ti) == 30 * 6,
+           f"conserva los 6 registros de TI por copia; obtuvo {len(df_ti)}", fallos)
+
+        completo = pd.read_csv(ruta_tmp, low_memory=False)
+        cols_c = resolver_columnas(completo)
+        ti_completo = completo.loc[marcar_ti(completo, cols_c)]
+        ok(len(df_ti) == len(ti_completo),
+           "leer por lotes da el mismo resultado que leer todo de una vez", fallos)
+    finally:
+        ruta_tmp.unlink(missing_ok=True)
+
     print("\n" + "=" * 60)
     if fallos:
         print(f"RESULTADO: {len(fallos)} prueba(s) fallaron")

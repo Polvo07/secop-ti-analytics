@@ -148,14 +148,51 @@ def marcar_ti(df: pd.DataFrame, cols: dict[str, str]) -> pd.Series:
 
 
 # --- Construcción del modelo -------------------------------------------------
-def construir(df_raw: pd.DataFrame) -> dict[str, pd.DataFrame]:
+def cargar_ti_por_lotes(ruta, tam_lote: int = 250_000) -> tuple[pd.DataFrame, int]:
+    """
+    Lee el CSV crudo por lotes y conserva únicamente los contratos de TI.
+
+    El archivo completo tiene millones de filas y 85 columnas; cargarlo entero
+    en memoria consume varios GB y hace fallar el proceso en un equipo normal.
+    La estrategia es filtrar temprano: se leen solo las columnas necesarias, se
+    procesa por lotes y se descarta la gran mayoría de filas antes de acumular.
+    El resultado final es una fracción del original y ya cabe cómodamente.
+
+    Devuelve (contratos_ti, total_leido).
+    """
+    encabezado = pd.read_csv(ruta, nrows=0)
+    cols = resolver_columnas(encabezado)
+    columnas_usadas = list(dict.fromkeys(cols.values()))
+    print(f"[carga] leyendo {len(columnas_usadas)} de {len(encabezado.columns)} columnas")
+
+    lotes: list[pd.DataFrame] = []
+    total = 0
+    for i, lote in enumerate(
+        pd.read_csv(ruta, usecols=columnas_usadas, chunksize=tam_lote, low_memory=False),
+        start=1,
+    ):
+        total += len(lote)
+        ti = lote.loc[marcar_ti(lote, cols)]
+        if len(ti):
+            lotes.append(ti)
+        acumulado = sum(len(x) for x in lotes)
+        print(f"[carga] lote {i}: {total:,} leídos · {acumulado:,} de TI")
+
+    if not lotes:
+        raise RuntimeError("Ningún registro quedó clasificado como TI. Revisa los filtros.")
+
+    return pd.concat(lotes, ignore_index=True), total
+
+
+def construir(df_raw: pd.DataFrame, n_total: int | None = None) -> dict[str, pd.DataFrame]:
     cols = resolver_columnas(df_raw)
     reporte: list[str] = []
 
-    n0 = len(df_raw)
+    n0 = n_total if n_total is not None else len(df_raw)
     reporte.append(f"- Registros descargados: **{n0:,}**")
 
-    # 1) Aislar TI
+    # 1) Aislar TI. Si los datos ya vienen filtrados por lotes, este paso no
+    #    descarta nada adicional y simplemente confirma el universo.
     es_ti = marcar_ti(df_raw, cols)
     df = df_raw.loc[es_ti].copy()
     reporte.append(f"- Contratos clasificados como TI: **{len(df):,}** ({len(df)/n0:.1%} del total)")
@@ -287,8 +324,8 @@ def main() -> int:
         print(f"[error] No existe {config.ARCHIVO_RAW}. Ejecuta primero: python src/extraer.py")
         return 1
 
-    df_raw = pd.read_csv(config.ARCHIVO_RAW, low_memory=False)
-    salida = construir(df_raw)
+    df_ti, n_total = cargar_ti_por_lotes(config.ARCHIVO_RAW)
+    salida = construir(df_ti, n_total=n_total)
 
     salida["hechos"].to_csv(config.ARCHIVO_HECHOS, index=False, encoding="utf-8")
     salida["dim_entidad"].to_csv(config.ARCHIVO_DIM_ENTIDAD, index=False, encoding="utf-8")
