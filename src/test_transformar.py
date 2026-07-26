@@ -15,7 +15,8 @@ import numpy as np
 import pandas as pd
 
 import config
-from transformar import a_numero, construir, marcar_ti, normalizar_nombre, resolver_columnas
+from transformar import (a_numero, clasificar_ti, construir, marcar_ti,
+                         normalizar_nombre, resolver_columnas)
 
 
 def muestra_sintetica() -> pd.DataFrame:
@@ -107,6 +108,59 @@ def muestra_sintetica() -> pd.DataFrame:
              valor_del_contrato="50000", valor_pagado="50000",
              proveedor_adjudicado="COMPUTO EXPRESS S.A.S", documento_proveedor="901555",
              es_pyme="Sí"),
+        # Falso positivo real detectado en los datos: obra civil que menciona
+        # redes de datos. Coincide por palabra clave pero debe quedar excluido,
+        # y su UNSPSC (8110) es ingeniería civil, no la familia informática 8111.
+        dict(id_contrato="C-007", nombre_entidad="AEROCIVIL",
+             nit_entidad="899999", departamento="Caldas", ciudad="Manizales",
+             orden="Nacional", sector="Transporte",
+             descripcion_del_proceso="Construccion de obras civiles y redes de datos en el aeropuerto",
+             codigo_de_categoria_principal="V1.81.10.15.00",
+             tipo_de_contrato="Obra", modalidad_de_contratacion="Licitación pública",
+             estado_contrato="En ejecución", fecha_de_firma="2024-09-10",
+             fecha_de_inicio_del_contrato="2024-10-01", fecha_de_fin_del_contrato="2026-10-01",
+             valor_del_contrato="634300000000", valor_pagado="100000000000",
+             proveedor_adjudicado="CONSORCIO AEROPUERTO", documento_proveedor="901777",
+             es_pyme="No"),
+        # Otro falso positivo: "redes sociales" no es infraestructura de red
+        dict(id_contrato="C-008", nombre_entidad="ALCALDIA DE CALI",
+             nit_entidad="890399", departamento="Valle del Cauca", ciudad="Cali",
+             orden="Territorial", sector="Otros",
+             descripcion_del_proceso="Administracion de redes sociales de la entidad",
+             codigo_de_categoria_principal="",
+             tipo_de_contrato="Prestación de servicios",
+             modalidad_de_contratacion="Contratación directa",
+             estado_contrato="En ejecución", fecha_de_firma="2024-04-02",
+             fecha_de_inicio_del_contrato="2024-04-15", fecha_de_fin_del_contrato="2024-12-15",
+             valor_del_contrato="80000000", valor_pagado="40000000",
+             proveedor_adjudicado="AGENCIA DIGITAL S.A.S.", documento_proveedor="901888",
+             es_pyme="Sí"),
+        # Verdadero positivo del segmento 81: familia 8111 = servicios informáticos
+        dict(id_contrato="C-009", nombre_entidad="DIAN",
+             nit_entidad="800197", departamento="Bogotá", ciudad="Bogotá",
+             orden="Nacional", sector="Hacienda",
+             descripcion_del_proceso="Servicio de centro de datos y respaldo de informacion",
+             codigo_de_categoria_principal="V1.81.11.20.00",
+             tipo_de_contrato="Prestación de servicios",
+             modalidad_de_contratacion="Selección abreviada subasta inversa",
+             estado_contrato="En ejecución", fecha_de_firma="2025-02-10",
+             fecha_de_inicio_del_contrato="2025-03-01", fecha_de_fin_del_contrato="2026-02-28",
+             valor_del_contrato="900000000", valor_pagado="300000000",
+             proveedor_adjudicado="CENTRO DE DATOS S.A.S.", documento_proveedor="901999",
+             es_pyme="No"),
+        # Convenio interadministrativo: menciona sistemas de información pero su
+        # objeto es tan amplio que no es defendible contarlo como gasto en TI.
+        dict(id_contrato="C-010", nombre_entidad="GOBERNACION DEL META",
+             nit_entidad="892099", departamento="Meta", ciudad="Villavicencio",
+             orden="Territorial", sector="Otros",
+             descripcion_del_proceso="AUNAR ESFUERZOS TECNICOS Y ECONOMICOS PARA FORTALECER SISTEMAS DE INFORMACION",
+             codigo_de_categoria_principal="V1.80.10.15.00",
+             tipo_de_contrato="Convenio", modalidad_de_contratacion="Contratación directa",
+             estado_contrato="En ejecución", fecha_de_firma="2024-07-15",
+             fecha_de_inicio_del_contrato="2024-08-01", fecha_de_fin_del_contrato="2025-07-31",
+             valor_del_contrato="234300000000", valor_pagado="50000000000",
+             proveedor_adjudicado="VALOR PROVEEDOR", documento_proveedor="",
+             es_pyme="No"),
     ]
     return pd.DataFrame(filas)
 
@@ -127,6 +181,8 @@ def main() -> int:
        "normalizar_nombre unifica variantes societarias y tildes", fallos)
     ok(normalizar_nombre("") == "SIN INFORMACION",
        "normalizar_nombre maneja vacíos", fallos)
+    ok(normalizar_nombre("VALOR PROVEEDOR") == "SIN INFORMACION",
+       "normalizar_nombre descarta el relleno 'VALOR PROVEEDOR'", fallos)
     ok(a_numero(pd.Series(["1.500.000.000"]))[0] == 1_500_000_000,
        "a_numero interpreta formato colombiano de miles (1.500.000.000)", fallos)
     ok(a_numero(pd.Series(["1,500,000.50"]))[0] == 1_500_000.50,
@@ -146,16 +202,33 @@ def main() -> int:
     ok(len(cols) >= 15, f"resolver_columnas mapeó {len(cols)} campos lógicos", fallos)
 
     es_ti = marcar_ti(raw, cols)
-    ok(bool(es_ti.sum() == 6),
-       f"marcar_ti aisló 6 de 7 registros (excluye alimentos escolares); obtuvo {int(es_ti.sum())}", fallos)
     ok(not bool(es_ti[raw["id_contrato"] == "C-003"].iloc[0]),
-       "marcar_ti excluye correctamente el contrato que no es de TI", fallos)
+       "excluye el contrato que no es de TI (alimentos escolares)", fallos)
+    ok(not bool(es_ti[raw["id_contrato"] == "C-007"].iloc[0]),
+       "excluye obra civil aunque su descripción mencione redes de datos", fallos)
+    ok(not bool(es_ti[raw["id_contrato"] == "C-008"].iloc[0]),
+       "excluye 'redes sociales', que no es infraestructura de red", fallos)
+    ok(bool(es_ti[raw["id_contrato"] == "C-009"].iloc[0]),
+       "incluye la familia UNSPSC 8111 (servicios informáticos) del segmento 81", fallos)
+    ok(not bool(es_ti[raw["id_contrato"] == "C-010"].iloc[0]),
+       "excluye convenios de 'aunar esfuerzos' aunque mencionen sistemas de información", fallos)
+    ok(bool(es_ti.sum() == 7),
+       f"el universo final queda en 7 de 11 registros; obtuvo {int(es_ti.sum())}", fallos)
+
+    origen = clasificar_ti(raw, cols)
+    ok(origen[raw["id_contrato"] == "C-001"].iloc[0] == "codigo",
+       "registra origen 'codigo' cuando el UNSPSC respalda la clasificación", fallos)
+    ok(origen[raw["id_contrato"] == "C-002"].iloc[0] == "texto",
+       "registra origen 'texto' cuando solo coincide la descripción", fallos)
 
     salida = construir(raw)
     h = salida["hechos"]
 
-    ok(len(h) == 4,
-       f"la tabla de hechos deja 4 filas tras quitar duplicado y valor nulo; obtuvo {len(h)}", fallos)
+    ok("origen_clasificacion" in h.columns,
+       "la tabla de hechos incluye el nivel de confianza de la clasificación", fallos)
+
+    ok(len(h) == 5,
+       f"la tabla de hechos deja 5 filas tras quitar duplicado y valor nulo; obtuvo {len(h)}", fallos)
     ok(h["id_contrato"].is_unique, "no quedan id_contrato duplicados", fallos)
     ok(h["valor"].notna().all() and (h["valor"] > 0).all(),
        "todos los valores son numéricos y positivos", fallos)
@@ -206,8 +279,8 @@ def main() -> int:
         df_ti, total = cargar_ti_por_lotes(ruta_tmp, tam_lote=50)
         ok(total == len(grande),
            f"la lectura por lotes recorre todas las filas ({total:,})", fallos)
-        ok(len(df_ti) == 30 * 6,
-           f"conserva los 6 registros de TI por copia; obtuvo {len(df_ti)}", fallos)
+        ok(len(df_ti) == 30 * 7,
+           f"conserva los 7 registros de TI por copia; obtuvo {len(df_ti)}", fallos)
 
         completo = pd.read_csv(ruta_tmp, low_memory=False)
         cols_c = resolver_columnas(completo)

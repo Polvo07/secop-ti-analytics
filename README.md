@@ -32,23 +32,54 @@ vale la pena mirar de cerca.
 
 ## Hallazgos
 
-> Esta sección se completa al ejecutar el pipeline. Los números salen de
-> `docs/reporte_calidad.md`, que se genera automáticamente.
+<!-- HALLAZGOS:INICIO -->
+
+*Cifras generadas automáticamente por `src/generar_hallazgos.py` el 26/07/2026. Periodo analizado: 2023–2026.*
 
 | Indicador | Valor |
 |---|---|
-| Contratos de TI analizados | _pendiente_ |
-| Valor total contratado | _pendiente_ |
-| % adjudicado por baja competencia | _pendiente_ |
-| Entidades contratantes | _pendiente_ |
-| Proveedores | _pendiente_ |
-| Participación de los 10 mayores proveedores | _pendiente_ |
+| Contratos de TI analizados | 119,113 |
+| Valor total contratado | $25.8 billones COP |
+| Valor mediano por contrato | $29.6 millones |
+| **Adjudicado por contratación directa** | **49.3%** |
+| Entidades contratantes | 2,912 |
+| Proveedores | 44,287 |
+| Participación de los 10 mayores proveedores | 21.7% |
+| Contratos respaldados por código UNSPSC oficial | 36.7% |
 
-**Conclusiones:**
+### 1. Casi la mitad del gasto en TI se adjudica sin competencia abierta
 
-1. _pendiente_
-2. _pendiente_
-3. _pendiente_
+De los $25.8 billones contratados en tecnología, el **49.3%** se adjudicó por contratación directa. La cifra excluye deliberadamente la mínima cuantía, que por diseño aplica a compras pequeñas y no implica ausencia de competencia.
+
+El resultado se sostiene al recortar el universo de distintas formas:
+
+| Escenario | Contratos | Valor | % contratación directa |
+|---|---:|---:|---:|
+| Universo completo | 119,113 | $25.8 billones | 49.3% |
+| Solo respaldados por código UNSPSC | 43,697 | $19.3 billones | 47.4% |
+| Excluyendo valores atípicos | 118,694 | $25.8 billones | 49.3% |
+
+La variación entre escenarios es de apenas 1.9%, así que el hallazgo no depende de cómo se delimite el universo.
+
+### 2. El mercado está mucho menos concentrado de lo esperado
+
+Participan **44,287 proveedores** distintos y los diez mayores captan apenas el **21.7%** del valor. Para un sector con altas barreras técnicas, es una dispersión notable: el gasto se reparte en miles de contratos pequeños en lugar de concentrarse en unos pocos grandes contratistas.
+
+La mediana de $29.6 millones frente a un promedio de $217.0 millones confirma el patrón: unos pocos megacontratos elevan el promedio, pero el contrato típico es pequeño.
+
+### 3. La concentración de la contratación directa varía mucho por entidad
+
+| Entidad | Contratos | Valor |
+|---|---:|---:|
+| RNEC | 143 | $2.0 billones |
+| RAMA JUDICIAL DIRECCION EJECUTIVA DE ADMINISTRACION JUDICIAL | 181 | $873.7 mil millones |
+| SENA DIRECCION GENERAL | 70 | $790.1 mil millones |
+| FONDO NACIONAL DEL AHORRO | 113 | $731.6 mil millones |
+| MINISTERIO DEL INTERIOR | 300 | $620.2 mil millones |
+
+El porcentaje de adjudicación directa no es uniforme entre entidades. Esa dispersión, más que el promedio nacional, es lo que señala dónde vale la pena mirar de cerca.
+
+<!-- HALLAZGOS:FIN -->
 
 ---
 

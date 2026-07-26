@@ -71,6 +71,10 @@ def normalizar_nombre(nombre: str) -> str:
     """
     Estandariza razones sociales: mayúsculas, sin puntuación redundante ni
     sufijos societarios, para que 'ABC S.A.S.' y 'ABC SAS' cuenten como uno solo.
+
+    Los textos de relleno ('VALOR PROVEEDOR', 'NO DEFINIDO') se colapsan en una
+    sola categoría, porque de lo contrario aparecen como si fueran empresas
+    reales en los rankings por valor adjudicado.
     """
     if not isinstance(nombre, str) or not nombre.strip():
         return "SIN INFORMACION"
@@ -78,7 +82,9 @@ def normalizar_nombre(nombre: str) -> str:
     limpio = re.sub(r"[^\w\s]", " ", limpio)
     limpio = re.sub(r"\b(S\s*A\s*S|SAS|S\s*A|LTDA|E\s*S\s*P|SUCURSAL|COLOMBIA)\b", " ", limpio)
     limpio = re.sub(r"\s+", " ", limpio).strip()
-    return limpio or "SIN INFORMACION"
+    if not limpio or limpio in config.PROVEEDORES_INVALIDOS:
+        return "SIN INFORMACION"
+    return limpio
 
 
 def _texto_a_numero(valor: str) -> float:
@@ -123,28 +129,57 @@ def a_numero(serie: pd.Series) -> pd.Series:
 
 
 # --- Filtro del universo TI --------------------------------------------------
-def marcar_ti(df: pd.DataFrame, cols: dict[str, str]) -> pd.Series:
+def _codigo_unspsc(serie: pd.Series) -> pd.Series:
     """
-    Un contrato es de TI si su categoría UNSPSC pertenece a un segmento de
-    tecnología, o si su descripción contiene términos inequívocamente de TI.
+    Reduce el código de categoría a sus dígitos, en orden.
 
-    Se usan las dos vías porque la categoría llega vacía o mal diligenciada en
-    parte de los registros; el reporte de calidad cuantifica ese hueco.
+    SECOP II lo publica como 'V1.43.23.15.00' (segmento.familia.clase.producto).
+    Al quitar el prefijo de versión y los puntos queda '43231500', que permite
+    filtrar por prefijo a la profundidad que se necesite: '43' toma el segmento
+    completo, '8111' toma solo una familia dentro del segmento 81.
     """
-    por_categoria = pd.Series(False, index=df.index)
+    texto = serie.astype(str).str.upper()
+    sin_version = texto.str.replace(r"^V\d+\.?", "", regex=True)
+    return sin_version.str.replace(r"\D", "", regex=True)
+
+
+def clasificar_ti(df: pd.DataFrame, cols: dict[str, str]) -> pd.Series:
+    """
+    Clasifica cada contrato y registra POR QUÉ vía entró al universo de TI.
+
+    Devuelve 'codigo' si lo respalda la clasificación oficial UNSPSC, 'texto' si
+    solo coincidió por palabras en el objeto contractual, y '' si no es de TI.
+
+    La distinción importa: los que entran solo por texto son mucho más frágiles,
+    porque dependen de cómo redactó el objeto un funcionario. Guardar el origen
+    permite reportar los hallazgos con y sin ellos, en vez de esconder el
+    supuesto detrás de un único número.
+    """
+    por_codigo = pd.Series(False, index=df.index)
     if "categoria" in cols:
-        cat = df[cols["categoria"]].astype(str)
-        # Formato típico: "V1.43.23.15.00" -> el segmento son los 2 dígitos tras "V1."
-        segmento = cat.str.extract(r"^V?\d*\.?(\d{2})", expand=False)
-        por_categoria = segmento.isin(config.SEGMENTOS_UNSPSC_TI).fillna(False)
+        codigo = _codigo_unspsc(df[cols["categoria"]])
+        for prefijo in config.PREFIJOS_UNSPSC_TI:
+            por_codigo |= codigo.str.startswith(prefijo, na=False)
 
     por_texto = pd.Series(False, index=df.index)
+    excluido = pd.Series(False, index=df.index)
     if "descripcion" in cols:
         desc = df[cols["descripcion"]].map(sin_tildes)
         patron = "|".join(re.escape(p) for p in config.PALABRAS_CLAVE_TI)
         por_texto = desc.str.contains(patron, regex=True, na=False)
 
-    return por_categoria | por_texto
+        patron_excl = "|".join(re.escape(p) for p in config.EXCLUSIONES)
+        excluido = desc.str.contains(patron_excl, regex=True, na=False)
+
+    origen = pd.Series("", index=df.index, dtype="object")
+    origen[por_texto & ~excluido] = "texto"
+    origen[por_codigo & ~excluido] = "codigo"  # el respaldo oficial prevalece
+    return origen
+
+
+def marcar_ti(df: pd.DataFrame, cols: dict[str, str]) -> pd.Series:
+    """Máscara booleana del universo de TI."""
+    return clasificar_ti(df, cols) != ""
 
 
 # --- Construcción del modelo -------------------------------------------------
@@ -191,15 +226,22 @@ def construir(df_raw: pd.DataFrame, n_total: int | None = None) -> dict[str, pd.
     n0 = n_total if n_total is not None else len(df_raw)
     reporte.append(f"- Registros descargados: **{n0:,}**")
 
-    # 1) Aislar TI. Si los datos ya vienen filtrados por lotes, este paso no
-    #    descarta nada adicional y simplemente confirma el universo.
-    es_ti = marcar_ti(df_raw, cols)
-    df = df_raw.loc[es_ti].copy()
+    # 1) Aislar TI y registrar por qué vía entró cada contrato. Si los datos ya
+    #    vienen filtrados por lotes, este paso no descarta nada adicional.
+    origen = clasificar_ti(df_raw, cols)
+    df = df_raw.loc[origen != ""].copy()
+    df["origen_clasificacion"] = origen.loc[df.index]
     reporte.append(f"- Contratos clasificados como TI: **{len(df):,}** ({len(df)/n0:.1%} del total)")
+    if len(df):
+        respaldo = (df["origen_clasificacion"] == "codigo").mean()
+        reporte.append(f"- Respaldados por código UNSPSC oficial: **{respaldo:.1%}** "
+                       f"(el resto entró por coincidencia de texto)")
 
-    # 2) Renombrar a nombres lógicos
+    # 2) Renombrar a nombres lógicos, conservando las columnas derivadas que ya
+    #    se calcularon y que no forman parte del mapa del origen.
     df = df.rename(columns={real: logico for logico, real in cols.items()})
-    df = df[[c for c in MAPA_COLUMNAS if c in df.columns]].copy()
+    conservar = [c for c in MAPA_COLUMNAS if c in df.columns] + ["origen_clasificacion"]
+    df = df[conservar].copy()
 
     # 3) Tipos
     for campo in ("valor", "valor_pagado"):
@@ -300,6 +342,7 @@ def construir(df_raw: pd.DataFrame, n_total: int | None = None) -> dict[str, pd.
         "fecha_fin", "anio", "mes", "anio_mes", "valor", "valor_pagado",
         "pct_ejecutado", "duracion_dias", "modalidad", "tipo_contrato", "estado",
         "categoria", "descripcion", "baja_competencia", "valor_atipico", "rango_valor",
+        "origen_clasificacion",
     ) if c in df.columns]
     hechos = df[cols_hechos].copy()
 

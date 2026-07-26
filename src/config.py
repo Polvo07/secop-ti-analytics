@@ -23,23 +23,62 @@ APP_TOKEN_ENV = "SOCRATA_APP_TOKEN"
 FECHA_INICIO = "2023-01-01"
 
 # --- Definición del universo "TI" -------------------------------------------
-# SECOP II clasifica con UNSPSC en `codigo_de_categoria_principal`,
-# con formato tipo "V1.43.23.15.00". El segmento (2 dígitos tras "V1.") define
-# la familia de bienes/servicios.
-#   43 = Difusión de tecnologías de información y telecomunicaciones
-#   81 = Servicios basados en ingeniería, investigación y tecnología
-SEGMENTOS_UNSPSC_TI = ["43", "81"]
+# SECOP II clasifica con UNSPSC en `codigo_de_categoria_principal`, con formato
+# tipo "V1.43.23.15.00", donde los dígitos son: segmento.familia.clase.producto.
+#
+# Se filtra por prefijo, a la profundidad que cada caso requiere:
+#   43   = segmento completo: equipos de cómputo, telecomunicaciones y software.
+#          Todo el segmento es tecnología, así que se toma entero.
+#   8111 = SOLO la familia de servicios informáticos dentro del segmento 81
+#          (desarrollo de software, centros de datos, administración de sistemas).
+#
+# El segmento 81 completo NO sirve: incluye ingeniería civil y ambiental. Al
+# usarlo entero se colaban obras como la construcción del Aeropuerto del Café
+# por $634 mil millones, que inflaban el universo con gasto que no es de TI.
+PREFIJOS_UNSPSC_TI = ["43", "8111"]
 
 # Respaldo por palabra clave sobre la descripción del proceso. Se usa porque la
 # categoría UNSPSC llega vacía o mal diligenciada en una fracción de registros.
+# Los términos son específicos a propósito: "redes" a secas capturaba contratos
+# de manejo de "redes sociales", que no son de TI.
 PALABRAS_CLAVE_TI = [
-    "software", "hardware", "licenciamiento", "licencias",
+    "software", "hardware", "licenciamiento de software", "licencias de software",
     "ciberseguridad", "seguridad informatica", "seguridad de la informacion",
     "infraestructura tecnologica", "servidores", "datacenter", "data center",
-    "nube", "cloud", "hosting", "computadores", "equipos de computo",
-    "desarrollo de software", "aplicativo", "sistema de informacion",
-    "mesa de ayuda", "soporte tecnico", "conectividad", "redes",
-    "telecomunicaciones", "internet", "fibra optica", "base de datos",
+    "centro de datos", "computacion en la nube", "servicios en la nube",
+    "hosting", "computadores", "equipos de computo", "equipos de computacion",
+    "desarrollo de software", "aplicativo", "aplicaciones moviles",
+    "sistema de informacion", "sistemas de informacion",
+    "mesa de ayuda", "soporte tecnico",
+    "servicio de conectividad", "servicios de conectividad", "conectividad a internet",
+    "redes de datos", "red de datos", "cableado estructurado",
+    "telecomunicaciones", "fibra optica", "base de datos", "bases de datos",
+    "canal de internet", "servicio de internet",
+]
+
+# Términos que descalifican un contrato aunque haya coincidido por palabra clave.
+# Evitan los falsos positivos más frecuentes: obra civil que menciona "redes"
+# (de acueducto), y comunicaciones que menciona "redes sociales".
+EXCLUSIONES = [
+    "redes sociales", "community manager", "publicidad", "pauta digital",
+    "obra civil", "obras civiles", "construccion de", "pavimento", "pavimentacion",
+    "acueducto", "alcantarillado", "interventoria a la obra", "interventoria de obra",
+    "lado aire", "malla vial", "puente vehicular", "mantenimiento de vias",
+    # Convenios interadministrativos: su objeto es tan amplio ("aunar esfuerzos
+    # técnicos, económicos, humanos y logísticos para...") que mencionan
+    # tecnología de pasada. Contarlos como gasto en TI no es defendible.
+    "aunar esfuerzos",
+    # Detectados al revisar los mayores contratos clasificados solo por texto
+    "restauracion ecologica", "conectividad ecologica", "dispositivos medicos",
+    "mandato sin representacion",
+]
+
+# Textos de relleno que aparecen en el campo de proveedor cuando el registro
+# quedó incompleto. Sin depurarlos, "VALOR PROVEEDOR" figura entre los diez
+# mayores contratistas del país con casi medio billón de pesos.
+PROVEEDORES_INVALIDOS = [
+    "VALOR PROVEEDOR", "NO DEFINIDO", "NO APLICA", "POR DEFINIR",
+    "SIN INFORMACION", "NA", "N A", "PENDIENTE", "NO REGISTRA",
 ]
 
 # --- Umbrales de negocio -----------------------------------------------------
