@@ -26,23 +26,30 @@ def _cabeceras() -> dict:
     return {"X-App-Token": token} if token else {}
 
 
-def inspeccionar_esquema() -> list[str]:
+def inspeccionar_esquema(muestra: int = 200) -> list[str]:
     """
-    Trae una fila para conocer las columnas reales del dataset.
+    Descubre las columnas reales del dataset a partir de una muestra de filas.
 
-    SECOP II ha cambiado nombres de columnas entre versiones, así que el pipeline
-    no asume el esquema: lo consulta y se adapta.
+    No basta con mirar una sola fila: la API de Socrata omite los campos vacíos
+    en cada registro, así que una fila individual solo muestra los campos que
+    ella tiene poblados. Si se inspeccionara una sola fila y justo le faltara
+    `fecha_de_firma`, el filtro de fecha se caería en silencio y se descargaría
+    toda la historia del dataset sin aviso.
     """
     resp = requests.get(
-        config.API_URL, params={"$limit": 1}, headers=_cabeceras(), timeout=60
+        config.API_URL, params={"$limit": muestra}, headers=_cabeceras(), timeout=60
     )
     resp.raise_for_status()
     filas = resp.json()
     if not filas:
         raise RuntimeError("La API respondió sin registros. Revisa el DATASET_ID.")
-    columnas = sorted(filas[0].keys())
-    print(f"[esquema] {len(columnas)} columnas detectadas")
-    return columnas
+
+    columnas: set[str] = set()
+    for fila in filas:
+        columnas.update(fila.keys())
+
+    print(f"[esquema] {len(columnas)} columnas detectadas en {len(filas)} filas de muestra")
+    return sorted(columnas)
 
 
 def _resolver(columnas: list[str], *candidatos: str) -> str | None:
@@ -115,6 +122,25 @@ def descargar(limite_total: int | None = None, tam_pagina: int = 50_000) -> pd.D
 
     df = pd.concat(paginas, ignore_index=True)
     print(f"[descarga] finalizada: {len(df):,} filas x {len(df.columns)} columnas")
+
+    # Verificación explícita: confirma que el filtro de fecha realmente se aplicó.
+    # Sin esto, un filtro que falla en silencio pasa desapercibido hasta el análisis.
+    col_fecha = _resolver(list(df.columns), "fecha_de_firma", "fecha_de_firma_del_contrato")
+    if col_fecha:
+        fechas = pd.to_datetime(df[col_fecha], errors="coerce")
+        validas = fechas.notna().sum()
+        print(
+            f"[verificación] fechas de firma entre {fechas.min():%Y-%m-%d} y "
+            f"{fechas.max():%Y-%m-%d} ({validas:,} de {len(df):,} legibles)"
+        )
+        if where and fechas.min() < pd.Timestamp(config.FECHA_INICIO):
+            print(
+                f"[ALERTA] hay registros anteriores a {config.FECHA_INICIO}: "
+                "el filtro del servidor no se aplicó como se esperaba."
+            )
+    else:
+        print("[ALERTA] no se identificó columna de fecha de firma en lo descargado.")
+
     return df
 
 
