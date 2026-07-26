@@ -1,0 +1,41 @@
+# --- Datos ------------------------------------------------------------------
+# El CSV crudo de SECOP II pesa cientos de MB: excede el límite de GitHub y no
+# aporta nada al repo, porque el pipeline lo reconstruye desde la API.
+data/raw/*.csv
+
+# El modelo procesado se ignora por defecto. Si al generarlo pesa menos de ~25 MB,
+# comenta la línea siguiente y súbelo: así el .pbix abre sin tener que correr
+# el pipeline, y quien revise el repo ve datos reales de inmediato.
+data/processed/*.csv
+
+# Se conservan las carpetas vacías en el repo
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+# Sí se sube la muestra pequeña, si la generas (ver README)
+!data/muestra_*.csv
+
+# --- Credenciales -----------------------------------------------------------
+# Nunca subir el token de Socrata ni ninguna credencial
+.env
+.env.*
+*.token
+secrets.json
+
+# --- Python -----------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# --- Power BI ---------------------------------------------------------------
+# Archivos temporales de bloqueo que crea Power BI Desktop al abrir un .pbix
+~$*.pbix
+*.pbix.bak
+
+# --- Sistema operativo ------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
