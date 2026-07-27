@@ -79,12 +79,13 @@ def construir_seccion() -> str:
 
     L: list[str] = [INICIO, ""]
     L.append(f"*Cifras generadas automáticamente por `src/generar_hallazgos.py` "
-             f"el {date.today():%d/%m/%Y}. Periodo analizado: {periodo}.*")
+             f"el {date.today():%d/%m/%Y}. Periodo analizado: {periodo}. "
+             f"Todos los valores en pesos colombianos (COP).*")
     L.append("")
     L.append("| Indicador | Valor |")
     L.append("|---|---|")
     L.append(f"| Contratos de TI analizados | {len(h):,} |")
-    L.append(f"| Valor total contratado | {cop(total)} COP |")
+    L.append(f"| Valor total contratado | {cop(total)} |")
     L.append(f"| Valor mediano por contrato | {cop(h['valor'].median())} |")
     L.append(f"| **Adjudicado por contratación directa** | **{directa:.1%}** |")
     L.append(f"| Entidades contratantes | {len(ent):,} |")
@@ -105,7 +106,7 @@ def construir_seccion() -> str:
         titular = "La contratación directa pesa menos de lo esperado en el gasto en TI"
     L.append(f"### 1. {titular}")
     L.append("")
-    L.append(f"De los {cop(total)} contratados en tecnología, el **{directa:.1%}** se "
+    L.append(f"De los {cop(total)} de pesos contratados en tecnología, el **{directa:.1%}** se "
              "adjudicó por contratación directa. La cifra excluye deliberadamente la "
              "mínima cuantía, que por diseño aplica a compras pequeñas y no implica "
              "ausencia de competencia.")

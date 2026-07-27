@@ -36,12 +36,12 @@ datos crudos no entregan.
 
 <!-- HALLAZGOS:INICIO -->
 
-*Cifras generadas automáticamente por `src/generar_hallazgos.py` el 26/07/2026. Periodo analizado: 2023–2026.*
+*Cifras generadas automáticamente por `src/generar_hallazgos.py` el 26/07/2026. Periodo analizado: 2023–2026. Todos los valores en pesos colombianos (COP).*
 
 | Indicador | Valor |
 |---|---|
 | Contratos de TI analizados | 119,113 |
-| Valor total contratado | $25.8 billones COP |
+| Valor total contratado | $25.8 billones |
 | Valor mediano por contrato | $29.6 millones |
 | **Adjudicado por contratación directa** | **49.3%** |
 | Entidades contratantes | 2,912 |
@@ -51,7 +51,7 @@ datos crudos no entregan.
 
 ### 1. Casi la mitad del gasto en TI se adjudica sin competencia abierta
 
-De los $25.8 billones contratados en tecnología, el **49.3%** se adjudicó por contratación directa. La cifra excluye deliberadamente la mínima cuantía, que por diseño aplica a compras pequeñas y no implica ausencia de competencia.
+De los $25.8 billones de pesos contratados en tecnología, el **49.3%** se adjudicó por contratación directa. La cifra excluye deliberadamente la mínima cuantía, que por diseño aplica a compras pequeñas y no implica ausencia de competencia.
 
 El resultado se sostiene al recortar el universo de distintas formas:
 
@@ -200,8 +200,10 @@ python src/test_transformar.py
 
 **Prueba de robustez.** El hallazgo principal se recalcula sobre universos
 alternativos. Si la conclusión cambiara según cómo se recorte el universo, sería
-frágil y habría que reportarla como rango. La variación observada es de 1,2
-puntos, así que se afirma sin condicionar.
+frágil y habría que reportarla como rango. La variación observada aparece en la
+tabla de escenarios de la sección de hallazgos, que se genera desde los datos:
+este párrafo no repite la cifra a mano justamente para que no pueda quedar
+desactualizado.
 
 **Cruce entre herramientas.** El total calculado en Power BI coincide con el
 calculado en Python por un camino completamente distinto. Esa coincidencia valida
