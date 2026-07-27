@@ -7,26 +7,28 @@ modelo dimensional y tablero en Power BI.
 **Fuente:** [SECOP II – Contratos Electrónicos](https://www.datos.gov.co/Gastos-Gubernamentales/SECOP-II-Contratos-Electr-nicos/jbjy-vk9h),
 Colombia Compra Eficiente · Portal Nacional de Datos Abiertos.
 
+![Tablero de Power BI: panorama del gasto público en TI](docs/dashboard-panorama.png)
+
 ---
 
 ## El problema
 
 El Estado colombiano publica cada contrato que firma, pero los datos crudos son
-prácticamente inutilizables para responder preguntas de negocio: más de 100
-columnas, nombres de entidades y proveedores escritos de formas distintas para el
-mismo actor, categorías sin diligenciar y valores en formatos inconsistentes.
+prácticamente inutilizables para responder preguntas de negocio: 85 columnas,
+3,5 millones de registros, nombres de entidades y proveedores escritos de formas
+distintas para el mismo actor, categorías sin diligenciar y valores en formatos
+inconsistentes.
 
 Este proyecto convierte ese ruido en respuestas concretas:
 
 1. ¿Cuánto gasta el Estado en tecnología y cómo evoluciona en el tiempo?
 2. ¿Qué entidades concentran ese gasto?
 3. ¿Qué proveedores lo capturan y qué tan concentrado está el mercado?
-4. ¿Qué proporción se adjudica por modalidades de baja competencia?
-5. ¿Cómo se distribuye geográficamente y por tamaño de contrato?
+4. ¿Qué proporción se adjudica sin competencia abierta?
 
 La pregunta 4 es la más relevante: la contratación directa es legal y muchas veces
-justificada, pero una concentración alta en una entidad específica es una señal que
-vale la pena mirar de cerca.
+justificada, pero conocer su magnitud y dónde se concentra es información que los
+datos crudos no entregan.
 
 ---
 
@@ -86,14 +88,20 @@ El porcentaje de adjudicación directa no es uniforme entre entidades. Esa dispe
 ## Arquitectura
 
 ```
-API Socrata  ──►  extraer.py  ──►  data/raw/       (CSV crudo, sin tocar)
-                                        │
-                                        ▼
-                              transformar.py  ──►  data/processed/  (modelo estrella)
-                                        │
-                                        ▼
-                                  Power BI  ──►  dashboard.pbix
+API Socrata ──► extraer.py ──► data/raw/        CSV crudo, nunca se modifica
+                                    │
+                                    ▼
+                          transformar.py ──► data/processed/   modelo estrella
+                                    │
+                    ┌───────────────┼───────────────┐
+                    ▼               ▼               ▼
+              explorar.py    generar_hallazgos.py   Power BI
+              validación         README          dashboard.pbix
 ```
+
+Cada script hace una sola cosa. Eso permitió ajustar el filtro de clasificación
+tres veces sin volver a descargar 3,5 millones de registros: cada iteración costó
+minutos en lugar de horas.
 
 **Modelo dimensional** (esquema estrella, para que Power BI filtre rápido y las
 medidas DAX no dependan de relaciones ambiguas):
@@ -117,35 +125,87 @@ dim_entidad ──► hechos_contratos ◄── dim_proveedor
 
 Las decisiones no obvias, que es donde está el criterio real del proyecto:
 
-**El esquema no se asume, se consulta.** SECOP II ha cambiado nombres de columnas
-entre versiones. `extraer.py` pide una fila primero para leer el esquema real, y
-`transformar.py` resuelve cada campo lógico contra varios nombres candidatos. Si
-mañana cambian `fecha_de_firma` por `fecha_firma_contrato`, el pipeline sigue
-corriendo.
+**El esquema se consulta sobre una muestra, no sobre una fila.** La API de Socrata
+omite los campos vacíos en cada registro, así que una fila individual solo muestra
+los campos que ella tiene poblados. Inspeccionando una sola fila, el esquema
+reportó 81 columnas cuando el dataset tenía 85. Si a esa fila le hubiera faltado
+`fecha_de_firma`, el filtro de fecha no se habría construido y se habría
+descargado toda la historia del dataset sin ningún aviso. Se corrigió uniendo las
+llaves de 200 filas.
 
-**"TI" se define por dos vías, no una.** El filtro primario es el segmento UNSPSC
-(43 = tecnologías de información y telecomunicaciones, 81 = servicios de
-ingeniería y tecnología). Pero esa categoría llega vacía o mal diligenciada en una
-fracción de los registros, así que se complementa con búsqueda de términos en la
-descripción del objeto contractual. El reporte de calidad cuantifica cuánto aporta
-cada vía.
+**"TI" se define por código UNSPSC y por texto, con exclusiones.** El filtro
+primario usa prefijos del clasificador oficial: el segmento `43` completo
+(tecnologías de información y telecomunicaciones) y **solo la familia `8111`**
+del segmento 81 (servicios informáticos).
+
+Tomar el segmento 81 entero fue el primer intento y estuvo mal: ese segmento se
+llama "servicios basados en ingeniería" e incluye ingeniería civil. Con él, el
+universo daba $57,5 billones e incorporaba contratos como la construcción del
+Aeropuerto del Café por $634 mil millones. Restringir a la familia 8111 y sumar
+una lista de exclusiones (obra civil, convenios de "aunar esfuerzos", redes
+sociales) dejó el universo en $25,8 billones.
+
+**Cada contrato registra por qué vía entró.** El filtro por texto es más frágil
+que el código oficial, porque depende de cómo redactó el objeto un funcionario.
+En vez de escoger una sola vía, la columna `origen_clasificacion` guarda si el
+respaldo fue el código UNSPSC o la coincidencia de texto. Eso permite recalcular
+cualquier hallazgo con y sin los registros frágiles, en lugar de esconder el
+supuesto detrás de un número único.
+
+**El indicador reportado es más conservador que el disponible.** El pipeline marca
+tres modalidades como de baja competencia, lo que arroja 66,2%. Pero la mínima
+cuantía es un mecanismo legítimo para compras pequeñas y contarla exagera el
+hallazgo. Se reporta únicamente la contratación directa: una cifra más baja y
+defendible ante quien conozca contratación pública.
 
 **Los atípicos se marcan, no se borran.** Un contrato de TI por 50.000 COP es casi
 seguro un error de digitación, pero borrarlo silenciosamente distorsiona los
-conteos. Se marca con `valor_atipico` y el tablero permite excluirlos con un filtro,
-de modo que la decisión sea visible y reversible.
+conteos. Se marca con `valor_atipico`, lo que deja la decisión visible y permite
+medir su impacto.
 
 **Los nombres se normalizan antes de agrupar.** "TECNOLOGÍA S.A.S.", "Tecnologia
-SAS" y "TECNOLOGIA S A S" son el mismo proveedor. Sin normalizar (tildes,
-puntuación, sufijos societarios), cualquier ranking de proveedores es falso.
+SAS" y "TECNOLOGIA S A S" son el mismo proveedor. Sin normalizar tildes,
+puntuación y sufijos societarios, cualquier ranking es falso. La normalización
+también detecta textos de relleno: sin depurarlos, "VALOR PROVEEDOR" figuraba
+entre los diez mayores contratistas del país con $454 mil millones.
 
 **Las fechas invertidas anulan la duración, no la vuelven negativa.** Hay contratos
 con fecha de fin anterior a la de inicio. Propagar un número negativo contamina
 cualquier promedio; dejarlo nulo lo excluye correctamente del cálculo.
 
-**Se usa CSV y no Parquet.** Parquet sería más eficiente, pero CSV es legible desde
-cualquier herramienta sin dependencias extra y Power BI lo consume nativamente. A
-este volumen la diferencia de rendimiento no justifica la fricción.
+**El archivo se procesa por lotes.** 3,5 millones de filas por 85 columnas
+consumen entre 8 y 12 GB en memoria. Se leen 250.000 filas a la vez, se conservan
+solo los contratos de TI y se descarta el resto antes de acumular. Además se leen
+20 columnas de 85. El resultado son 119.113 filas que caben sin problema.
+
+**Las cifras del README se generan, no se escriben.** `generar_hallazgos.py`
+calcula los números desde los datos y los inserta entre marcadores. Incluso los
+titulares se derivan de las cifras, para que el texto no pueda contradecir a su
+propia tabla cuando los datos cambien.
+
+---
+
+## Validación
+
+El análisis se verifica de tres formas independientes.
+
+**Pruebas automatizadas.** 35 pruebas que corren sin conexión, sobre un conjunto
+sintético que reproduce los problemas reales del origen: duplicados, valores
+nulos, fechas invertidas, nombres con y sin tilde, importes en formato colombiano
+y anglosajón, y los falsos positivos detectados en producción.
+
+```bash
+python src/test_transformar.py
+```
+
+**Prueba de robustez.** El hallazgo principal se recalcula sobre universos
+alternativos. Si la conclusión cambiara según cómo se recorte el universo, sería
+frágil y habría que reportarla como rango. La variación observada es de 1,2
+puntos, así que se afirma sin condicionar.
+
+**Cruce entre herramientas.** El total calculado en Power BI coincide con el
+calculado en Python por un camino completamente distinto. Esa coincidencia valida
+las relaciones del modelo y los tipos de datos antes de construir encima.
 
 ---
 
@@ -158,39 +218,55 @@ git clone https://github.com/Polvo07/secop-ti-analytics.git
 cd secop-ti-analytics
 pip install -r requirements.txt
 
-# (opcional pero recomendado) token gratuito de Socrata para mejor límite de tasa
+# Opcional: token gratuito de Socrata para mejor límite de velocidad
+# https://evergreen.data.socrata.com/signup
 export SOCRATA_APP_TOKEN="tu_token"
 
+python src/test_transformar.py        # verifica el entorno antes de descargar
 python src/extraer.py --limite 5000   # prueba rápida
-python src/extraer.py                 # descarga completa
+python src/extraer.py                 # descarga completa (~40 min)
 python src/transformar.py             # genera el modelo en data/processed/
-python src/test_transformar.py        # pruebas del pipeline
+python src/explorar.py                # valida el universo y muestra hallazgos
+python src/generar_hallazgos.py       # escribe las cifras en este README
 ```
 
 Luego se abre `dashboard.pbix` y se actualizan las fuentes apuntando a
 `data/processed/`.
 
+**Sobre los datos versionados:** las dimensiones se incluyen en el repositorio
+porque son pequeñas. La tabla de hechos pesa 53 MB y se omite; en su lugar se
+versiona `data/muestra_hechos.csv`, una muestra aleatoria de 5.000 contratos con
+semilla fija para que sea reproducible.
+
 ---
 
-## Calidad de datos
+## Documentación
 
-El pipeline incluye 21 pruebas automatizadas que corren sin conexión (usan un
-conjunto sintético con los problemas reales del origen: duplicados, valores nulos,
-fechas invertidas, nombres con y sin tilde, categorías vacías, importes en formato
-colombiano y anglosajón).
+- **[`docs/como-funciona.md`](docs/como-funciona.md)** — explicación detallada de
+  cada etapa, las decisiones tomadas y dónde se rompería el análisis
+- **[`docs/medidas_dax.md`](docs/medidas_dax.md)** — medidas del tablero y
+  estructura del modelo en Power BI
+- **`docs/reporte_calidad.md`** — se genera en cada ejecución con cuántos
+  registros se descartaron y por qué
 
-```bash
-python src/test_transformar.py
-```
+---
 
-Cada ejecución de `transformar.py` genera además `docs/reporte_calidad.md` con
-cuántos registros se descartaron y por qué motivo.
+## Limitaciones
+
+- Los valores son **montos contratados, no ejecutados**. Un contrato firmado por
+  $1.000 millones pudo pagarse parcialmente o no ejecutarse.
+- El **último año está incompleto** y no es comparable con los anteriores.
+- Solo el **36,7% de los contratos** tiene respaldo de código UNSPSC oficial; el
+  resto entra por coincidencia de texto. Por eso el hallazgo principal se reporta
+  también sobre el subconjunto respaldado por código.
+- Un contrato de TI que ningún funcionario clasificó ni describió con los términos
+  esperados queda fuera del universo, y no hay forma de detectarlo.
 
 ---
 
 ## Stack
 
-Python (pandas, requests) · API Socrata · Power BI · DAX · Git
+Python (pandas, requests) · API Socrata / SoQL · Power BI · DAX · Git
 
 ---
 
